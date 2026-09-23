@@ -13,11 +13,11 @@ on:
       apk_path:
         description: "Path to the APK to analyse (relative to repo root)"
         required: true
-        default: "loader/input/app.apk"
+        default: "loader/input/PHubLoader.apk"
       baseline_path:
         description: "Optional second APK to diff against (e.g. the stock build)"
         required: false
-        default: ""
+        default: "loader/input/PH_original.apk"
   push:
     branches: [main]
     paths:
@@ -51,7 +51,7 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
-          APK="${{ github.event.inputs.apk_path || 'loader/input/app.apk' }}"
+          APK="${{ github.event.inputs.apk_path || 'loader/input/PHubLoader.apk' }}"
           if [ ! -f "$APK" ]; then
             # Not an error: pushes to the tooling shouldn't go red just because
             # no APK is checked in. Warn and let the downstream steps skip.

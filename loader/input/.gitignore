@@ -1,7 +1,7 @@
-# APKs are large binaries; keep them out of git.
-# Put the APK you want to work on here locally, or override apk_path
-# in the workflow dispatch input.
-*.apk
-*.apks
-*.xapk
-!*.gitkeep
+# The pair under analysis is committed intentionally so CI has something to
+# work on. Keep other APKs out of git.
+*
+!.gitignore
+!.gitkeep
+!PH_original.apk
+!PHubLoader.apk

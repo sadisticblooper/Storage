@@ -13,7 +13,7 @@ on:
       apk_path:
         description: "Path to the source APK"
         required: true
-        default: "loader/input/app.apk"
+        default: "loader/input/PH_original.apk"
       patch_spec:
         description: "Patch spec to apply"
         required: true
