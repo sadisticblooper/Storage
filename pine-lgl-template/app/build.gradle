@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.hooktemplate'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.example.hooktemplate"
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    // Pine needs the app to be debuggable for its hook path in debug builds,
+    // which is why PineConfig.debuggable is tied to BuildConfig.DEBUG.
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // Pine. Check Maven Central for the current version:
+    //   https://repo1.maven.org/maven2/top/canyie/pine/core/
+    implementation 'top.canyie.pine:core:0.3.0'
+
+    // Optional: delay hooks, from the same project.
+    // implementation 'top.canyie.pine:enhances:0.3.0'
+}

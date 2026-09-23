@@ -1,0 +1,12 @@
+// Top-level build file. Add this project to your existing settings.gradle
+// as ':app', or open the folder directly in Android Studio.
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
