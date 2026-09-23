@@ -1,0 +1,7 @@
+# Dependencies for the loader/ analysis and repack tooling.
+#
+# Pinned so CI runs are reproducible; bump deliberately.
+androguard==4.1.4
+pyelftools==0.32
+PyYAML==6.0.2
+loguru==0.7.3

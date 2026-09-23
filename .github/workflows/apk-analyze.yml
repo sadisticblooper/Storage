@@ -40,11 +40,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: loader/requirements.txt
 
       - name: Install analysis dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install androguard==4.1.4 pyelftools pyyaml loguru
+          pip install -r loader/requirements.txt
 
       - name: Resolve APK path
         id: resolve
@@ -52,22 +53,28 @@ jobs:
           set -euo pipefail
           APK="${{ github.event.inputs.apk_path || 'loader/input/app.apk' }}"
           if [ ! -f "$APK" ]; then
-            echo "::error::APK not found at '$APK'."
-            echo "Commit the APK under loader/input/ or pass apk_path on dispatch."
+            # Not an error: pushes to the tooling shouldn't go red just because
+            # no APK is checked in. Warn and let the downstream steps skip.
+            echo "::warning::No APK at '$APK'. Commit one under loader/input/ or pass apk_path when dispatching."
             ls -la loader/input 2>/dev/null || true
-            exit 1
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
           echo "Analysing: $APK ($(stat -c%s "$APK") bytes)"
 
       - name: Extract APK metadata
+        if: steps.resolve.outputs.found == 'true'
         run: |
           mkdir -p out
           python loader/scripts/apk_info.py "${{ steps.resolve.outputs.apk }}" \
             --json out/apk-info.json | tee out/apk-info.txt
 
       - name: Diff against baseline
-        if: ${{ github.event.inputs.baseline_path != '' }}
+        if: |
+          steps.resolve.outputs.found == 'true' &&
+          github.event.inputs.baseline_path != ''
         run: |
           BASE="${{ github.event.inputs.baseline_path }}"
           if [ ! -f "$BASE" ]; then
@@ -78,12 +85,14 @@ jobs:
             --json out/apk-diff.json | tee out/apk-diff.txt
 
       - name: Triage native libraries
+        if: steps.resolve.outputs.found == 'true'
         run: |
           mkdir -p out
           python loader/scripts/native_triage.py "${{ steps.resolve.outputs.apk }}" \
             --json out/native-triage.json | tee out/native-triage.txt
 
       - name: Summarise
+        if: steps.resolve.outputs.found == 'true'
         run: |
           {
             echo "## APK analysis"
@@ -102,6 +111,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report
+        if: steps.resolve.outputs.found == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: apk-analysis-${{ github.run_number }}
