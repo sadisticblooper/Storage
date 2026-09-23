@@ -51,10 +51,14 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
-          APK="${{ github.event.inputs.apk_path || 'loader/input/PHubLoader.apk' }}"
+          # github.event.inputs is empty on push, so fall back to the checked-in
+          # defaults rather than relying on the input default.
+          APK="${{ github.event.inputs.apk_path }}"
+          BASE="${{ github.event.inputs.baseline_path }}"
+          [ -n "$APK" ] || APK="loader/input/PHubLoader.apk"
+          [ -n "$BASE" ] || BASE="loader/input/PH_original.apk"
+
           if [ ! -f "$APK" ]; then
-            # Not an error: pushes to the tooling shouldn't go red just because
-            # no APK is checked in. Warn and let the downstream steps skip.
             echo "::warning::No APK at '$APK'. Commit one under loader/input/ or pass apk_path when dispatching."
             ls -la loader/input 2>/dev/null || true
             echo "found=false" >> "$GITHUB_OUTPUT"
@@ -64,6 +68,15 @@ jobs:
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
           echo "Analysing: $APK ($(stat -c%s "$APK") bytes)"
 
+          if [ -n "$BASE" ] && [ -f "$BASE" ]; then
+            echo "has_baseline=true" >> "$GITHUB_OUTPUT"
+            echo "baseline=$BASE" >> "$GITHUB_OUTPUT"
+            echo "Baseline:  $BASE ($(stat -c%s "$BASE") bytes)"
+          else
+            echo "has_baseline=false" >> "$GITHUB_OUTPUT"
+            [ -n "$BASE" ] && echo "::warning::baseline '$BASE' not found, skipping diff"
+          fi
+
       - name: Extract APK metadata
         if: steps.resolve.outputs.found == 'true'
         run: |
@@ -72,16 +85,11 @@ jobs:
             --json out/apk-info.json | tee out/apk-info.txt
 
       - name: Diff against baseline
-        if: |
-          steps.resolve.outputs.found == 'true' &&
-          github.event.inputs.baseline_path != ''
+        if: steps.resolve.outputs.has_baseline == 'true'
         run: |
-          BASE="${{ github.event.inputs.baseline_path }}"
-          if [ ! -f "$BASE" ]; then
-            echo "::warning::baseline '$BASE' not found, skipping diff"
-            exit 0
-          fi
-          python loader/scripts/apk_diff.py "$BASE" "${{ steps.resolve.outputs.apk }}" \
+          python loader/scripts/apk_diff.py \
+            "${{ steps.resolve.outputs.baseline }}" \
+            "${{ steps.resolve.outputs.apk }}" \
             --json out/apk-diff.json | tee out/apk-diff.txt
 
       - name: Triage native libraries
