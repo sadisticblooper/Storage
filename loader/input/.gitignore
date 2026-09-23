@@ -1,0 +1,7 @@
+# APKs are large binaries; keep them out of git.
+# Put the APK you want to work on here locally, or override apk_path
+# in the workflow dispatch input.
+*.apk
+*.apks
+*.xapk
+!*.gitkeep

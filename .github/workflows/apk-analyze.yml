@@ -1,0 +1,110 @@
+name: APK Analyze
+
+# Static analysis for an APK checked into this repo. Produces a report and
+# uploads it as an artifact. Read-only: nothing is published.
+#
+# Note on inputs: the APK path is a workflow_dispatch input rather than a glob
+# so that a run always analyses exactly one file you chose. Change the default
+# if you move the APK.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_path:
+        description: "Path to the APK to analyse (relative to repo root)"
+        required: true
+        default: "loader/input/app.apk"
+      baseline_path:
+        description: "Optional second APK to diff against (e.g. the stock build)"
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - "loader/input/**.apk"
+      - "loader/scripts/**"
+      - ".github/workflows/apk-analyze.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install analysis dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install androguard==4.1.4 pyelftools pyyaml loguru
+
+      - name: Resolve APK path
+        id: resolve
+        run: |
+          set -euo pipefail
+          APK="${{ github.event.inputs.apk_path || 'loader/input/app.apk' }}"
+          if [ ! -f "$APK" ]; then
+            echo "::error::APK not found at '$APK'."
+            echo "Commit the APK under loader/input/ or pass apk_path on dispatch."
+            ls -la loader/input 2>/dev/null || true
+            exit 1
+          fi
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "Analysing: $APK ($(stat -c%s "$APK") bytes)"
+
+      - name: Extract APK metadata
+        run: |
+          mkdir -p out
+          python loader/scripts/apk_info.py "${{ steps.resolve.outputs.apk }}" \
+            --json out/apk-info.json | tee out/apk-info.txt
+
+      - name: Diff against baseline
+        if: ${{ github.event.inputs.baseline_path != '' }}
+        run: |
+          BASE="${{ github.event.inputs.baseline_path }}"
+          if [ ! -f "$BASE" ]; then
+            echo "::warning::baseline '$BASE' not found, skipping diff"
+            exit 0
+          fi
+          python loader/scripts/apk_diff.py "$BASE" "${{ steps.resolve.outputs.apk }}" \
+            --json out/apk-diff.json | tee out/apk-diff.txt
+
+      - name: Triage native libraries
+        run: |
+          mkdir -p out
+          python loader/scripts/native_triage.py "${{ steps.resolve.outputs.apk }}" \
+            --json out/native-triage.json | tee out/native-triage.txt
+
+      - name: Summarise
+        run: |
+          {
+            echo "## APK analysis"
+            echo
+            echo '```'
+            cat out/apk-info.txt
+            echo '```'
+            if [ -f out/apk-diff.txt ]; then
+              echo
+              echo "### Diff vs baseline"
+              echo
+              echo '```'
+              head -c 20000 out/apk-diff.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-analysis-${{ github.run_number }}
+          path: out/
+          retention-days: 30
+          if-no-files-found: warn
