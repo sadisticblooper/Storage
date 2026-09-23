@@ -4,19 +4,29 @@ A self-contained scaffold for hooking **your own** app so you can see what the
 loader architecture actually does at runtime. Nothing here targets a
 third-party APK, and there is no anti-tamper or detection-evasion code.
 
+The menu dex is embedded in the `.so` and loaded at runtime, the way the
+actionmods loader does it. See `ANALYSIS-loader.md` for the mechanism and for
+what I verified versus what I could not.
+
 ## Layout
 
 Two native modules compiled into one `.so`, plus a Java layer:
 
 ```
+tools/
+  embed_dex.py         dex -> generated headers (also reads out its signatures)
 app/src/main/
   java/com/example/hooktemplate/
-    HookApp.java       Application entry — runs before any activity
+    HookApp.java       Application entry — loads native, starts menu on UI thread
     Hooks.java         Pine hooks into your Java/Kotlin methods
     ScoreBoard.java    stand-in for your game logic
   cpp/
     lgl/
-      lgl.h            JNI symbols the menu library provides
+      lgl.h            orientation only; the real signatures are generated
+      dex_loader.h/.cpp  decode dex -> InMemoryDexClassLoader -> RegisterNatives
+      embedded_dex.h     GENERATED - the menu dex as hex
+      lgl_bindings.h     GENERATED - extern "C" decls + JNINativeMethod table
+      lgl_descriptors.h  GENERATED - class name and JNI descriptors
       impl.cpp         the only file that knows LGL exists
     mod/
       mod_api.h        the seam: features + values the mod exposes
@@ -28,6 +38,19 @@ The dependency points one way: `lgl/` includes `mod/mod_api.h`, never the
 reverse. Verified — `mod/` compiles cleanly with the `lgl/` directory deleted,
 so swapping menu libraries never touches your feature code.
 
+## Swapping the menu dex
+
+Never hand-edit the three generated headers. Point the tool at a dex and rerun:
+
+```
+python3 tools/embed_dex.py menu.dex --out app/src/main/cpp/lgl
+```
+
+It prints the constructor and `Changes` descriptors it found. That is not
+decoration — LGL variants disagree about whether `Changes` takes a `long lvalue`,
+and a wrong descriptor means the menu silently does nothing. Generating avoids
+the guesswork.
+
 ## How the pieces connect
 
 Adding a feature is two edits and nothing else:
@@ -38,6 +61,7 @@ Adding a feature is two edits and nothing else:
 3. Read that global at your hook site in `native_entry.cpp`.
 
 The menu writes a value, the hook reads it. That is the whole contract.
+
 
 The values are plain `bool`/`int` globals. They are written on the menu thread
 and read on the game thread, so there is no ordering guarantee — a value can
@@ -52,13 +76,20 @@ PHub's loader does roughly this, and you can reproduce each step transparently:
 |---|---|---|
 | `application` set to `actionmods.loader.core` | Runs loader code before your app code | `HookApp` in `AndroidManifest.xml` |
 | `appComponentFactory` swapped | Intercepts class loading for injection | not included; not needed for self-hooking |
-| `actionmods/dex/classes.dex` | Hook code, dynamically loaded | your own `Hooks` class, loaded normally |
-| `actionmods/lib/arm64.so` | Native hooks and menu | `lgl/` + `mod/` in one `.so` |
-| `actionmods/origin.apk` | Untouched original, loaded via classloader | not applicable — you own the source |
+| `.so` fetched from `action-mods.com` at runtime | Payload never sits in the APK | not applicable — you build your own `.so` |
+| menu dex hex-coded inside that `.so` | One artifact carries its own UI | `tools/embed_dex.py` + `lgl/dex_loader.cpp` |
+| natives registered by hand | Child-classloader classes are not auto-resolved | `RegisterNatives` in `lgl/dex_loader.cpp` |
 | `libfancy-bypass.so` | anti-frida / anti-debug / integrity defeat | **deliberately excluded** |
 
-The first four are ordinary app architecture. The last one only exists to hide
-from a check, and has no place in your own build.
+The dex-embedding and hand-registration rows are the mechanism this template
+copies, because they are ordinary technique that works for anyone. The last row
+only exists to hide from a check and has no place in your own build.
+
+One detail worth carrying over: the loader's `.so` exports **only `JNI_OnLoad`**,
+with no `Java_*` symbols at all. That is the fingerprint of a library that
+registers its natives explicitly rather than relying on name lookup — which it
+must, because its menu class is defined by a child classloader. `tools/embed_dex.py`
+generates the same kind of table from the dex it embeds.
 
 ## Loading the mod: two paths, and which to pick
 
