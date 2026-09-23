@@ -49,12 +49,21 @@ extern "C" jarray SettingsList(JNIEnv *env, jobject /*thiz*/) {
     return env->NewObjectArray(0, stringClass, nullptr);
 }
 
-extern "C" jobject Icon(JNIEnv * /*env*/, jobject /*thiz*/) {
-    // Path or URL the menu loads as the menu icon. Empty means none.
-    return nullptr;
+extern "C" jobject Icon(JNIEnv *env, jobject /*thiz*/) {
+    // The menu does Base64.decode(Icon()) and feeds the result to
+    // BitmapFactory.decodeByteArray() during construction. Returning null or an
+    // empty string is not safe - decode("") yields a zero-length array and
+    // decodeByteArray returns null, which the menu then sets as a bitmap. A
+    // real 1x1 transparent PNG is the smallest thing that cannot blow up.
+    static const char *kIconPngBase64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==";
+    return env->NewStringUTF(kIconPngBase64);
 }
 
 extern "C" jobject IconWebViewData(JNIEnv * /*env*/, jobject /*thiz*/) {
+    // Only consulted for RichWebView entries. Nothing here uses those, so the
+    // menu never reads this. Returning null is fine, unlike Icon().
     return nullptr;
 }
 
@@ -66,6 +75,11 @@ extern "C" void Init(JNIEnv * /*env*/, jobject /*thiz*/, jobject /*context*/,
 }
 
 // The interaction callback. Every user action lands here.
+//
+// `featNum` is the explicit number from the descriptor, and is what
+// mod::on_feature_changed routes on. The `featName` argument is deliberately
+// ignored: for Spinner and RadioButton the menu sends the selected item rather
+// than your label, so it is not a stable key. See mod_api.h.
 extern "C" void Changes(JNIEnv *env, jclass /*clazz*/, jobject /*context*/,
                         jint featNum, jobject /*featName*/, jint value,
                         jboolean boolean, jobject text) {
@@ -79,6 +93,6 @@ extern "C" void Changes(JNIEnv *env, jclass /*clazz*/, jobject /*context*/,
         }
     }
 
-    mod::on_feature_changed(featNum, value, 0, boolean == JNI_TRUE,
+    mod::on_feature_changed(featNum, value, boolean == JNI_TRUE,
                             textUtf8.empty() ? nullptr : textUtf8.c_str());
 }

@@ -9,6 +9,8 @@ android {
     defaultConfig {
         applicationId "com.example.hooktemplate"
         minSdk 24
+        // InMemoryDexClassLoader needs API 26+. minSdk 24 means the loader path
+        // is guarded at runtime and simply logs on 24-25 rather than crashing.
         targetSdk 35
         versionCode 1
         versionName "1.0"
@@ -24,6 +26,10 @@ android {
         cmake {
             path "src/main/cpp/CMakeLists.txt"
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {

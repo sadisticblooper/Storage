@@ -232,23 +232,39 @@ bool load_menu(JNIEnv *env, jobject app_context) {
     }
     LOGI("registered %u natives", kLglNativeBindingCount);
 
-    // 5. Construct the menu. Descriptor comes from the dex as well; if the ctor
-    //    cannot be found the generated headers and the dex are out of sync.
-    jmethodID ctor = env->GetMethodID(menuClass, "<init>", kLglMenuCtorDesc);
-    if (ctor == nullptr) {
-        LOGE("Menu constructor %s not found - regenerate headers",
-             kLglMenuCtorDesc);
+    // 5. Start the menu.
+    //
+    //    Use the menu's own static CreateMenu(Context) rather than constructing
+    //    it here. That method is the designed entry point and it does three
+    //    things we would otherwise have to reproduce by hand:
+    //      - setTheme(Theme.Material) on the host activity
+    //      - SetWindowManagerActivity(), which is what actually attaches the
+    //        overlay to the WindowManager
+    //      - ShowMenu(), which posts the delayed GetFeatureList() call
+    //
+    //    Constructing Menu directly and stopping there produces an object that
+    //    is never attached and never shown - a menu that silently does nothing.
+    //    That is the difference between this working and not.
+    //
+    //    Note CreateMenu takes a Context, not an Activity, and branches: given a
+    //    plain Context it hops to the main Looper and finds the top activity by
+    //    reflection, given an Activity it goes straight through. Passing the
+    //    Activity is the more predictable path, which is why HookApp is not the
+    //    one calling this.
+    jmethodID createMenu = env->GetStaticMethodID(
+            menuClass, "CreateMenu", "(Landroid/content/Context;)V");
+    if (createMenu == nullptr) {
+        LOGE("CreateMenu missing - regenerate headers from this dex");
         return false;
     }
-
-    jobject menu = env->NewObject(menuClass, ctor, app_context);
-    if (menu == nullptr || env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(menuClass, createMenu, app_context);
+    if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();
-        LOGE("Menu construction failed");
+        LOGE("CreateMenu threw");
         return false;
     }
-    LOGI("menu constructed");
+    LOGI("menu started");
     return true;
 }
 

@@ -1,22 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- android:name points at HookApp, so our code runs before any activity.
-         That is the same slot the loader occupies — here it is just normal
-         app code rather than an injected class. -->
+    <!-- The menu is an overlay window added to the WindowManager, so this is not
+         optional. Without it SetWindowManagerActivity() throws and the menu never
+         appears - and the failure looks like "the loader does nothing" rather
+         than a permission error. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <application
         android:name=".HookApp"
         android:allowBackup="false"
-        android:label="Hook Template">
+        android:label="Hook Template"
+        android:supportsRtl="true">
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@android:style/Theme.Material">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
     </application>
 
 </manifest>
