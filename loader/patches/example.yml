@@ -1,0 +1,62 @@
+# Example patch spec for loader/scripts/apply_patch.py
+#
+# Every change is declared here so it shows up in code review. Copy this to
+# patches/<yourname>.yml and point the workflow at it.
+#
+# Field reference:
+#   manifest:           <manifest> root attributes: package, versionName,
+#                       versionCode. These are un-namespaced.
+#   application:        <application> attributes: name, label,
+#                       appComponentFactory. These are android:-namespaced.
+#                       Use null to remove an attribute.
+#   activity/service/receiver/provider:
+#                       add/remove component entries by fully-qualified name.
+#   copy:               [{from: <repo path>, to: <path inside decoded apk>}]
+#   delete:             [<path inside decoded apk>]
+#   strings:            [{find, replace, path_regex}]
+#                       path_regex is matched against the path relative to the
+#                       decoded root, e.g. 'smali/.*\.smali' to limit the blast
+#                       radius to one dex.
+
+# --- rename the app / change version -----------------------------------------
+manifest:
+  versionName: "1.2.7.10-custom"
+
+application:
+  label: "My Patched Build"
+
+# --- swap in your own entrypoint ---------------------------------------------
+# Uncomment to point the app at a different Application class. Whatever you set
+# here must exist in one of the dex files in the APK, otherwise the process
+# crashes on startup with ClassNotFoundException.
+#
+# application:
+#   name: "com.example.myapp.MyApplication"
+
+# --- component surgery --------------------------------------------------------
+# activity:
+#   add:
+#     - com.example.myapp.ExtraActivity
+#   remove:
+#     - com.sherrytse.parallel.CredentialsExpiredActivity
+
+# --- replace binaries ---------------------------------------------------------
+# copy:
+#   - from: patches/assets/mylib.so
+#     to:   lib/arm64-v8a/mylib.so
+#   - from: patches/assets/classes2.dex
+#     to:   classes2.dex
+
+# --- drop things you do not want ---------------------------------------------
+# delete:
+#   - lib/armeabi-v7a
+#   - assets/dexopt/baseline.prof
+
+# --- text edits in decoded smali/xml -----------------------------------------
+# strings:
+#   - find: "https://old.endpoint.example"
+#     replace: "https://my.endpoint.example"
+#     path_regex: ".*\\.xml"
+#   - find: "Parallel Hub"
+#     replace: "My Hub"
+#     path_regex: "res/values/strings\\.xml"
