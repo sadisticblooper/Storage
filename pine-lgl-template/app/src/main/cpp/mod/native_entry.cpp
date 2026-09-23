@@ -12,6 +12,8 @@
 #include <cstring>
 #include <android/log.h>
 
+#include "../mod/mod_api.h"
+
 #define LOG_TAG "HookTemplate"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -49,15 +51,19 @@ static bool is_library_loaded(const char *name) {
 // Replace with real hook installation. Left as a stub on purpose: the
 // interesting part for a template is the load/thread/wait choreography, not a
 // borrowed hook body.
+//
+// The hook body reads the globals from mod/features.cpp. That is the whole
+// modular contract: the menu writes a value, the hook reads it.
 static void install_native_hooks() {
-    LOGI("installing native hooks");
+    LOGI("installing native hooks (no_death=%d score_mul=%d)",
+         mod::g_no_death, mod::g_score_multiplier);
     // if (!is_library_loaded(TARGET_LIB)) { ... }
     //
     // With Dobby linked:
     //   HOOK_LIB(TARGET_LIB, "0x123456", my_hook, orig_my_hook);
     //
-    // HOOK_LIB is the LGL helper; plain Dobby is:
-    //   DobbyHook((void *)target_addr, (void *)my_hook, (void **)&orig_my_hook);
+    // and inside my_hook:
+    //   if (mod::g_no_death) return 0;   // value written by the menu
 }
 
 static void *hack_thread(void *) {

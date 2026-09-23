@@ -4,30 +4,79 @@ A self-contained scaffold for hooking **your own** app so you can see what the
 loader architecture actually does at runtime. Nothing here targets a
 third-party APK, and there is no anti-tamper or detection-evasion code.
 
-Two layers:
+## Layout
 
-- `java/.../Hooks.java` — Pine hooks into your own Java/Kotlin methods. This is
-  the part PHub uses via its `Application` swap; here it runs as a normal
-  Application class in your own app.
-- `cpp/native_entry.cpp` — the native `System.loadLibrary` + constructor-thread
-  pattern LGL uses, so you can attach native hooks and a menu to it.
+Two native modules compiled into one `.so`, plus a Java layer:
 
-## Why the two layers line up
+```
+app/src/main/
+  java/com/example/hooktemplate/
+    HookApp.java       Application entry — runs before any activity
+    Hooks.java         Pine hooks into your Java/Kotlin methods
+    ScoreBoard.java    stand-in for your game logic
+  cpp/
+    lgl/
+      lgl.h            JNI symbols the menu library provides
+      impl.cpp         the only file that knows LGL exists
+    mod/
+      mod_api.h        the seam: features + values the mod exposes
+      features.cpp     descriptor table + interaction routing
+      native_entry.cpp load/thread/wait, then install hooks
+```
 
-PHub's loader does roughly this, and you can reproduce each step transparently
-in your own app:
+The dependency points one way: `lgl/` includes `mod/mod_api.h`, never the
+reverse. Verified — `mod/` compiles cleanly with the `lgl/` directory deleted,
+so swapping menu libraries never touches your feature code.
+
+## How the pieces connect
+
+Adding a feature is two edits and nothing else:
+
+1. One line in `kFeatures` in `mod/features.cpp` — its array index becomes the
+   `featNum` you receive back.
+2. One `case` in `on_feature_changed()`, storing into a `mod::g_*` global.
+3. Read that global at your hook site in `native_entry.cpp`.
+
+The menu writes a value, the hook reads it. That is the whole contract.
+
+The values are plain `bool`/`int` globals. They are written on the menu thread
+and read on the game thread, so there is no ordering guarantee — a value can
+change mid-frame. That is fine for a toggle. If a torn read would matter, snap
+it into a local at the top of the hook.
+
+## Why this shape matches the loader
+
+PHub's loader does roughly this, and you can reproduce each step transparently:
 
 | Loader step | What it is | Template equivalent |
 |---|---|---|
 | `application` set to `actionmods.loader.core` | Runs loader code before your app code | `HookApp` in `AndroidManifest.xml` |
 | `appComponentFactory` swapped | Intercepts class loading for injection | not included; not needed for self-hooking |
 | `actionmods/dex/classes.dex` | Hook code, dynamically loaded | your own `Hooks` class, loaded normally |
-| `actionmods/lib/arm64.so` + `lib...so` | Native hooks and menu | `native_entry.cpp` + `System.loadLibrary` |
+| `actionmods/lib/arm64.so` | Native hooks and menu | `lgl/` + `mod/` in one `.so` |
 | `actionmods/origin.apk` | Untouched original, loaded via classloader | not applicable — you own the source |
 | `libfancy-bypass.so` | anti-frida / anti-debug / integrity defeat | **deliberately excluded** |
 
-The first four are ordinary app architecture. The last one is the part that
-only exists to hide from a check, and it has no place in your own build.
+The first four are ordinary app architecture. The last one only exists to hide
+from a check, and has no place in your own build.
+
+## Loading the mod: two paths, and which to pick
+
+If you compile the mod *into* the target APK (the case here), `System.loadLibrary`
+runs it via `JNI_OnLoad` and the `__attribute__((constructor))`. Because your
+`HookApp` is the app's own Application class, you are already resident before
+most code you would want to hook runs.
+
+If instead you ship the mod as a *separate* app that loads a prebuilt `.so` into
+another process, you need a handle to that process and the module is loaded by
+the loader, not by `System.loadLibrary` in the target. That is a different
+deployment and a different set of problems — it is not what this template
+builds, and it is outside the "hook your own app" scope.
+
+The reason the `lgl`/`mod` split exists is that the second case needs a frozen
+ABI: a `.so` built elsewhere must call into a stable surface. `mod_api.h` is that
+surface — plain C++ types, no JNI in the mod's own signature, one-way include.
+
 
 ## Pine hooks
 
@@ -96,6 +145,75 @@ Then:
 ```cpp
 HOOK_LIB("libyourgame.so", "0x123456", my_hook, orig_my_hook);
 ```
+
+## Android version support
+
+Short answer: **not reliably on Android 16, and not at all on 16 KB-page
+devices without a rebuild.** Two separate problems, both currently open upstream.
+
+### 1. `libpine.so` is not 16 KB-page aligned
+
+Verified by inspecting the published artifact, not by reading the changelog:
+
+```
+$ readelf -lW jni/arm64-v8a/libpine.so | grep LOAD
+  LOAD  0x000000 0x0000000000000000 ... Align 0x1000
+  LOAD  0x010770 0x0000000000011770 ... Align 0x1000   <-- not 0x4000
+```
+
+Segments are 4 KB aligned and the second starts at vaddr `0x11770`, which is not
+a multiple of 16 KB. On a 16 KB-page kernel the loader refuses to map it and the
+app dies at startup with an unsatisfied link. Tracked upstream as
+[canyie/pine#107](https://github.com/canyie/pine/issues/107), still open.
+
+This matters more than it looks: since **1 November 2025** Google Play requires
+16 KB support for apps targeting Android 15+. Any device with 16 KB pages —
+increasingly common on newer arm64 hardware — cannot load the stock AAR.
+
+### 2. Hidden-API policy handling broke on Android 16
+
+Pine disables the hidden-API policy on init so hooks can reach non-SDK members.
+On Android 16 that path fails; the library logs `Method.getAccessFlags not found`
+and falls back to defaults. Tracked as
+[canyie/pine#110](https://github.com/canyie/pine/issues/110), open, reported
+against a vivo Android 16 build.
+
+Practical effect: hooks on public methods are fine, hooks on hidden APIs are not.
+If your hook targets something not in the SDK, assume it will not work.
+
+### What the project state actually says
+
+Latest commit is November 2025 (`[core] Fix incorrect log in elf image parser`).
+The last *release* is 0.3.0, from **July 2024** — over a year of fixes are on
+`master` but unpublished. Last explicit version-support fix was Feb 2025 for
+Android 15 QPR1.
+
+So: the maintainer is still active, but the released artifact lags the source,
+and neither has 16 KB support.
+
+### What to do
+
+- **Android 14 and below, 4 KB pages** — the published 0.3.0 AAR works. This is
+  the safe target.
+- **Android 15** — works; QPR1 needed the Feb 2025 fix, which is only on
+  `master`, so build Pine from source rather than using the AAR.
+- **Android 16** — expect hidden-API hooks to fail. Build from source and test
+  the specific method you need; do not assume.
+- **16 KB pages** — you must build Pine from source with an NDK that emits 16 KB
+  alignment (`-Wl,-z,max-page-size=16384`). The AAR cannot be fixed by
+  configuration alone.
+
+Building from source:
+
+```bash
+git clone https://github.com/canyie/pine
+cd pine && ./gradlew :core:assembleRelease
+# then depend on the local module instead of the Maven artifact
+```
+
+Worth confirming which page size your target device uses before debugging
+anything else — `adb shell getconf PAGE_SIZE` returning `16384` means the stock
+AAR will not load at all.
 
 ## Building
 
